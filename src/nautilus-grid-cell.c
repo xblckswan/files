@@ -304,19 +304,6 @@ nautilus_grid_cell_init (NautilusGridCell *self)
     g_object_bind_property (self, "item",
                             self->item_signal_group, "target",
                             G_BINDING_SYNC_CREATE);
-
-#if PANGO_VERSION_CHECK (1, 44, 4)
-    {
-        PangoAttrList *attr_list;
-
-        /* GTK4 TODO: This attribute is set in the UI file but GTK 3 ignores it.
-         * Remove this block after the switch to GTK 4. */
-        attr_list = pango_attr_list_new ();
-        pango_attr_list_insert (attr_list, pango_attr_insert_hyphens_new (FALSE));
-        gtk_label_set_attributes (GTK_LABEL (self->label), attr_list);
-        pango_attr_list_unref (attr_list);
-    }
-#endif
 }
 
 NautilusGridCell *
