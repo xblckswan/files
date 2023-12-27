@@ -751,24 +751,20 @@ nautilus_files_view_call_set_selection (NautilusFilesView *self,
     g_autoptr (GtkBitset) update_set = NULL;
     g_autoptr (GtkBitset) new_selection_set = NULL;
     g_autoptr (GtkBitset) old_selection_set = NULL;
-    guint n_items = g_list_model_get_n_items (G_LIST_MODEL (priv->model));
-    guint lower = 0;
-    guint upper = n_items - 1;
 
     old_selection_set = gtk_selection_model_get_selection (GTK_SELECTION_MODEL (priv->model));
     /* We aren't allowed to modify the actual selection bitset */
     update_set = gtk_bitset_copy (old_selection_set);
     new_selection_set = gtk_bitset_new_empty ();
 
-    /* Convert file list into items, already sorted by the model sorter */
-    selection_items = nautilus_view_model_get_sorted_items_for_files (priv->model, selection);
+    /* Convert file list into items */
+    selection_items = nautilus_view_model_get_items_for_files (priv->model, selection);
 
     /* Convert selection list into set of model indices */
     for (GList *l = selection_items; l != NULL; l = l->next)
     {
-        guint i = nautilus_view_model_find_ranged (priv->model, l->data, lower, upper);
+        guint i = nautilus_view_model_find (priv->model, l->data);
         gtk_bitset_add (new_selection_set, i);
-        lower = i + 1;
     }
 
     /* Set focus on the first selected row. */
