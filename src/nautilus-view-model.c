@@ -551,6 +551,95 @@ nautilus_view_model_add_items (NautilusViewModel *self,
     }
 }
 
+static NautilusViewItem **
+get_path_as_items (NautilusViewModel *self,
+                   NautilusViewItem  *item,
+                   guint             *target_depth)
+{
+    g_autoptr (GPtrArray) path = g_ptr_array_new_null_terminated (0, NULL, TRUE);
+    NautilusViewItem *current_item = item;
+
+    while (current_item != NULL)
+    {
+        g_ptr_array_insert (path, 0, current_item);
+
+        g_autoptr (NautilusFile) parent = nautilus_file_get_parent (nautilus_view_item_get_file (current_item));
+
+        if (!g_hash_table_contains (self->directory_reverse_map, parent))
+        {
+            break;
+        }
+        current_item = nautilus_view_model_get_item_for_file (self, parent);
+    }
+
+    *target_depth = path->len - 1;
+    return (NautilusViewItem **) g_ptr_array_steal (path, NULL);
+}
+
+/* Reverse recursive comparison */
+static GtkOrdering
+compare_at_row_depth (GtkSorter         *sorter,
+                      GtkTreeListRow    *row,
+                      NautilusViewItem **target_path)
+{
+    GtkOrdering parent_ordering = GTK_ORDERING_EQUAL;
+    guint row_depth = gtk_tree_list_row_get_depth (row);
+    g_assert (NAUTILUS_IS_VIEW_ITEM (target_path[row_depth]));
+
+    if (row_depth > 0)
+    {
+        /* Test how parents are sorted. */
+        g_autoptr (GtkTreeListRow) parent_row = gtk_tree_list_row_get_parent (row);
+        parent_ordering = compare_at_row_depth (sorter, parent_row, target_path);
+        if (parent_ordering != GTK_ORDERING_EQUAL)
+        {
+            return parent_ordering;
+        }
+    }
+
+    g_assert (parent_ordering == GTK_ORDERING_EQUAL);
+    /* Common parent. Compare items directly. */
+
+    g_autoptr (NautilusViewItem) row_item = gtk_tree_list_row_get_item (row);
+
+    return gtk_sorter_compare (sorter, row_item, target_path[row_depth]);
+}
+
+static GtkOrdering
+compare_row_to_path_as_items (GtkSorter         *sorter,
+                              GtkTreeListRow    *row,
+                              NautilusViewItem **target_path,
+                              guint              target_depth)
+{
+    guint row_depth = gtk_tree_list_row_get_depth (row);
+    g_autoptr (GtkTreeListRow) comparable_row = g_object_ref (row);
+
+    /* Walk up the tree if needed to be able to compare at the same depth. */
+    while (gtk_tree_list_row_get_depth (comparable_row) > target_depth)
+    {
+        g_object_unref (comparable_row);
+        comparable_row = gtk_tree_list_row_get_parent (comparable_row);
+    }
+
+    GtkOrdering ordering = compare_at_row_depth (sorter, comparable_row, target_path);
+
+    if (ordering == GTK_ORDERING_EQUAL)
+    {
+        if (row_depth < target_depth)
+        {
+            /* The row is an ascendant of the target, so it's sorted before it. */
+            ordering = GTK_ORDERING_SMALLER;
+        }
+        else if (row_depth > target_depth)
+        {
+            /* The row is a descendant of the target, so it's sorted after it. */
+            ordering = GTK_ORDERING_LARGER;
+        }
+    }
+
+    return ordering;
+}
+
 /**
  * nautilus_view_model_find:
  *
@@ -564,6 +653,8 @@ guint
 nautilus_view_model_find (NautilusViewModel *self,
                           NautilusViewItem  *item)
 {
+    guint target_depth;
+    g_autofree NautilusViewItem **path = get_path_as_items (self, item, &target_depth);
     guint n_items = g_list_model_get_n_items (G_LIST_MODEL (self->sort_model));
     guint lower = 0;
     guint upper = n_items - 1;
@@ -575,11 +666,10 @@ nautilus_view_model_find (NautilusViewModel *self,
     {
         guint middle = (lower + upper) / 2;
         g_autoptr (GtkTreeListRow) middle_row = g_list_model_get_item (G_LIST_MODEL (self->sort_model), middle);
-        g_autoptr (NautilusViewItem) middle_item = gtk_tree_list_row_get_item (middle_row);
-
-        g_return_val_if_fail (NAUTILUS_IS_VIEW_ITEM (middle_item), G_MAXUINT);
-
-        GtkOrdering ordering = gtk_sorter_compare (sorter, middle_item, item);
+        GtkOrdering ordering = compare_row_to_path_as_items (sorter,
+                                                             middle_row,
+                                                             path,
+                                                             target_depth);
 
         if (ordering == GTK_ORDERING_EQUAL)
         {
