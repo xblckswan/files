@@ -679,6 +679,7 @@ update_sort_order_from_metadata_and_preferences (NautilusFilesView *self)
 static void
 real_begin_loading (NautilusFilesView *self)
 {
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (self);
     update_sort_order_from_metadata_and_preferences (self);
 
     /* We could have changed to the trash directory or to searching, and then
@@ -686,7 +687,7 @@ real_begin_loading (NautilusFilesView *self)
     nautilus_files_view_update_context_menus (self);
     nautilus_files_view_update_toolbar_menus (self);
 
-    nautilus_list_base_setup_directory (NAUTILUS_LIST_BASE (self), nautilus_files_view_get_directory (self));
+    nautilus_list_base_setup_directory (NAUTILUS_LIST_BASE (self), priv->directory);
 }
 
 static void
@@ -1055,40 +1056,37 @@ real_set_templates_menu (NautilusView *view,
 }
 
 static gboolean
-showing_trash_directory (NautilusFilesView *view)
+showing_trash_directory (NautilusFilesView *self)
 {
-    NautilusFile *file;
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (self);
 
-    file = nautilus_files_view_get_directory_as_file (view);
-    if (file != NULL)
+    if (priv->directory_as_file != NULL)
     {
-        return nautilus_file_is_in_trash (file);
+        return nautilus_file_is_in_trash (priv->directory_as_file);
     }
     return FALSE;
 }
 
 static gboolean
-showing_recent_directory (NautilusFilesView *view)
+showing_recent_directory (NautilusFilesView *self)
 {
-    NautilusFile *file;
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (self);
 
-    file = nautilus_files_view_get_directory_as_file (view);
-    if (file != NULL)
+    if (priv->directory_as_file != NULL)
     {
-        return nautilus_file_is_in_recent (file);
+        return nautilus_file_is_in_recent (priv->directory_as_file);
     }
     return FALSE;
 }
 
 static gboolean
-showing_starred_directory (NautilusFilesView *view)
+showing_starred_directory (NautilusFilesView *self)
 {
-    NautilusFile *file;
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (self);
 
-    file = nautilus_files_view_get_directory_as_file (view);
-    if (file != NULL)
+    if (priv->directory_as_file != NULL)
     {
-        return nautilus_file_is_in_starred (file);
+        return nautilus_file_is_in_starred (priv->directory_as_file);
     }
     return FALSE;
 }
@@ -1964,16 +1962,14 @@ static void
 pattern_select_response_select (AdwWindow *dialog,
                                 gpointer   user_data)
 {
-    NautilusFilesView *view;
-    NautilusDirectory *directory;
+    NautilusFilesView *view = g_object_get_data (G_OBJECT (dialog), "view");
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (view);
     GtkWidget *entry;
     g_autolist (NautilusFile) selection = NULL;
 
-    view = g_object_get_data (G_OBJECT (dialog), "view");
     entry = g_object_get_data (G_OBJECT (dialog), "entry");
 
-    directory = nautilus_files_view_get_directory (view);
-    selection = nautilus_directory_match_pattern (directory,
+    selection = nautilus_directory_match_pattern (priv->directory,
                                                   gtk_editable_get_text (GTK_EDITABLE (entry)));
 
     nautilus_files_view_call_set_selection (view, selection);
@@ -4816,19 +4812,17 @@ load_error_callback (NautilusDirectory *directory,
                      GError            *error,
                      gpointer           callback_data)
 {
-    NautilusFilesView *view;
-
-    view = NAUTILUS_FILES_VIEW (callback_data);
+    NautilusFilesView *view = NAUTILUS_FILES_VIEW (callback_data);
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (view);
 
     /* FIXME: By doing a stop, we discard some pending files. Is
      * that OK?
      */
     nautilus_files_view_stop_loading (view);
 
-    nautilus_report_error_loading_directory
-        (nautilus_files_view_get_directory_as_file (view),
-        error,
-        nautilus_files_view_get_containing_window (view));
+    nautilus_report_error_loading_directory (priv->directory_as_file,
+                                             error,
+                                             nautilus_files_view_get_containing_window (view));
 }
 
 gboolean
@@ -4941,27 +4935,6 @@ nautilus_files_view_get_loading (NautilusFilesView *view)
     return priv->loading;
 }
 
-/**
- * nautilus_files_view_get_directory:
- *
- * Get the model directory for this NautilusFilesView.
- * @view: NautilusFilesView of interest.
- *
- * Return value: NautilusDirectory for this view.
- *
- **/
-NautilusDirectory *
-nautilus_files_view_get_directory (NautilusFilesView *view)
-{
-    NautilusFilesViewPrivate *priv;
-
-    g_return_val_if_fail (NAUTILUS_IS_FILES_VIEW (view), NULL);
-
-    priv = nautilus_files_view_get_instance_private (view);
-
-    return priv->directory;
-}
-
 GtkWidget *
 nautilus_files_view_get_content_widget (NautilusFilesView *view)
 {
@@ -5030,18 +5003,6 @@ trash_or_delete_files (GtkWindow         *parent_window,
                                                     (NautilusDeleteCallback) trash_or_delete_done_cb,
                                                     view);
     g_list_free_full (locations, g_object_unref);
-}
-
-NautilusFile *
-nautilus_files_view_get_directory_as_file (NautilusFilesView *view)
-{
-    NautilusFilesViewPrivate *priv;
-
-    g_assert (NAUTILUS_IS_FILES_VIEW (view));
-
-    priv = nautilus_files_view_get_instance_private (view);
-
-    return priv->directory_as_file;
 }
 
 static GdkTexture *
@@ -6220,6 +6181,7 @@ action_paste_files_into (GSimpleAction *action,
 static void
 real_action_rename (NautilusFilesView *view)
 {
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (view);
     NautilusFile *file;
     g_autolist (NautilusFile) selection = NULL;
     GtkWidget *dialog;
@@ -6239,7 +6201,7 @@ real_action_rename (NautilusFilesView *view)
             gtk_widget_set_cursor_from_name (GTK_WIDGET (window), "progress");
 
             dialog = nautilus_batch_rename_dialog_new (selection,
-                                                       nautilus_files_view_get_directory (view),
+                                                       priv->directory,
                                                        window);
 
             gtk_window_present (GTK_WINDOW (dialog));
@@ -7925,7 +7887,7 @@ real_update_actions_state (NautilusFilesView *view)
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
                                  !nautilus_files_view_is_empty (view));
 
-    current_location = nautilus_file_get_location (nautilus_files_view_get_directory_as_file (view));
+    current_location = nautilus_file_get_location (priv->directory_as_file);
     current_uri = g_file_get_uri (current_location);
     can_star_current_directory = nautilus_tag_manager_can_star_contents (nautilus_tag_manager_get (), current_location);
 
@@ -8353,12 +8315,10 @@ static void
 nautilus_files_view_reset_view_menu (NautilusFilesView *view)
 {
     NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (view);
-    NautilusFile *file;
+    NautilusFile *file = priv->directory_as_file;
     GMenuModel *sort_section = priv->toolbar_menu_sections->sort_section;
     const gchar *action;
     gint i;
-
-    file = nautilus_files_view_get_directory_as_file (NAUTILUS_FILES_VIEW (view));
 
     /* When not in the special location, set an inexistant action to hide the
      * menu item. This works under the assumptiont that the menu item has its
@@ -9041,15 +9001,13 @@ nautilus_files_view_stop_loading (NautilusFilesView *view)
 }
 
 static gboolean
-nautilus_files_view_is_editable (NautilusFilesView *view)
+nautilus_files_view_is_editable (NautilusFilesView *self)
 {
-    NautilusDirectory *directory;
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (self);
 
-    directory = nautilus_files_view_get_directory (view);
-
-    if (directory != NULL)
+    if (priv->directory != NULL)
     {
-        return nautilus_directory_is_editable (directory);
+        return nautilus_directory_is_editable (priv->directory);
     }
 
     return TRUE;
@@ -9058,17 +9016,16 @@ nautilus_files_view_is_editable (NautilusFilesView *view)
 static gboolean
 nautilus_files_view_is_read_only (NautilusFilesView *view)
 {
-    NautilusFile *file;
+    NautilusFilesViewPrivate *priv = nautilus_files_view_get_instance_private (view);
 
     if (!nautilus_files_view_is_editable (view))
     {
         return TRUE;
     }
 
-    file = nautilus_files_view_get_directory_as_file (view);
-    if (file != NULL)
+    if (priv->directory_as_file != NULL)
     {
-        return !nautilus_file_can_write (file);
+        return !nautilus_file_can_write (priv->directory_as_file);
     }
     return FALSE;
 }
