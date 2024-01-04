@@ -24,8 +24,7 @@
 
 struct NautilusFileQueue
 {
-    GList *head;
-    GList *tail;
+    GQueue *files;
     GHashTable *item_to_link_map;
 };
 
@@ -35,6 +34,7 @@ nautilus_file_queue_new (void)
     NautilusFileQueue *queue;
 
     queue = g_new0 (NautilusFileQueue, 1);
+    queue->files = g_queue_new ();
     queue->item_to_link_map = g_hash_table_new (g_direct_hash, g_direct_equal);
 
     return queue;
@@ -44,7 +44,7 @@ void
 nautilus_file_queue_destroy (NautilusFileQueue *queue)
 {
     g_hash_table_destroy (queue->item_to_link_map);
-    nautilus_file_list_free (queue->head);
+    g_queue_free_full (queue->files, g_object_unref);
     g_free (queue);
 }
 
@@ -52,25 +52,18 @@ void
 nautilus_file_queue_enqueue (NautilusFileQueue *queue,
                              NautilusFile      *file)
 {
+    GList *link;
+
     if (g_hash_table_lookup (queue->item_to_link_map, file) != NULL)
     {
         /* It's already on the queue. */
         return;
     }
 
-    if (queue->tail == NULL)
-    {
-        queue->head = g_list_append (NULL, file);
-        queue->tail = queue->head;
-    }
-    else
-    {
-        queue->tail = g_list_append (queue->tail, file);
-        queue->tail = queue->tail->next;
-    }
+    link = g_list_prepend (NULL, file);
+    g_queue_push_tail_link (queue->files, link);
 
-    nautilus_file_ref (file);
-    g_hash_table_insert (queue->item_to_link_map, file, queue->tail);
+    g_hash_table_insert (queue->item_to_link_map, g_object_ref (file), link);
 }
 
 NautilusFile *
@@ -99,14 +92,7 @@ nautilus_file_queue_remove (NautilusFileQueue *queue,
         return;
     }
 
-    if (link == queue->tail)
-    {
-        /* Need to special-case removing the tail. */
-        queue->tail = queue->tail->prev;
-    }
-
-    queue->head = g_list_remove_link (queue->head, link);
-    g_list_free (link);
+    g_queue_delete_link (queue->files, link);
     g_hash_table_remove (queue->item_to_link_map, file);
 
     nautilus_file_unref (file);
@@ -115,16 +101,11 @@ nautilus_file_queue_remove (NautilusFileQueue *queue,
 NautilusFile *
 nautilus_file_queue_head (NautilusFileQueue *queue)
 {
-    if (queue->head == NULL)
-    {
-        return NULL;
-    }
-
-    return NAUTILUS_FILE (queue->head->data);
+    return g_queue_peek_head (queue->files);
 }
 
 gboolean
 nautilus_file_queue_is_empty (NautilusFileQueue *queue)
 {
-    return (queue->head == NULL);
+    return g_queue_is_empty (queue->files);
 }
