@@ -4382,26 +4382,6 @@ get_default_file_icon (void)
     return fallback_icon;
 }
 
-GFilesystemPreviewType
-nautilus_file_get_filesystem_use_preview (NautilusFile *file)
-{
-    GFilesystemPreviewType use_preview;
-    NautilusFile *parent;
-
-    parent = nautilus_file_get_parent (file);
-    if (parent != NULL)
-    {
-        use_preview = parent->details->filesystem_use_preview;
-        g_object_unref (parent);
-    }
-    else
-    {
-        use_preview = 0;
-    }
-
-    return use_preview;
-}
-
 gboolean
 nautilus_file_get_filesystem_remote (NautilusFile *file)
 {
@@ -4433,7 +4413,15 @@ get_speed_tradeoff_preference_for_file (NautilusFile               *file,
 
     g_return_val_if_fail (NAUTILUS_IS_FILE (file), FALSE);
 
-    use_preview = nautilus_file_get_filesystem_use_preview (file);
+    g_autoptr (NautilusFile) parent = nautilus_file_get_parent (file);
+    if (parent != NULL)
+    {
+        use_preview = parent->details->filesystem_use_preview;
+    }
+    else
+    {
+        use_preview = 0;
+    }
 
     if (value == NAUTILUS_SPEED_TRADEOFF_ALWAYS)
     {
