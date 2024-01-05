@@ -27,10 +27,10 @@
 #include "nautilus-directory-private.h"
 #include "nautilus-enums.h"
 #include "nautilus-file-private.h"
-#include "nautilus-file-queue.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-metadata.h"
+#include "nautilus-queue.h"
 #include "nautilus-signaller.h"
 
 /* turn this on to check if async. job calls are balanced */
@@ -3888,9 +3888,9 @@ start_or_stop_io (NautilusDirectory *directory)
 
     doing_io = FALSE;
     /* Take files that are all done off the queue. */
-    while (!nautilus_file_queue_is_empty (directory->details->high_priority_queue))
+    while (!nautilus_queue_is_empty (directory->details->high_priority_queue))
     {
-        file = nautilus_file_queue_head (directory->details->high_priority_queue);
+        file = nautilus_queue_head (directory->details->high_priority_queue);
 
         /* Start getting attributes if possible */
         file_info_start (directory, file, &doing_io);
@@ -3904,9 +3904,9 @@ start_or_stop_io (NautilusDirectory *directory)
     }
 
     /* High priority queue must be empty */
-    while (!nautilus_file_queue_is_empty (directory->details->low_priority_queue))
+    while (!nautilus_queue_is_empty (directory->details->low_priority_queue))
     {
-        file = nautilus_file_queue_head (directory->details->low_priority_queue);
+        file = nautilus_queue_head (directory->details->low_priority_queue);
 
         /* Start getting attributes if possible */
         mount_start (directory, file, &doing_io);
@@ -3924,9 +3924,9 @@ start_or_stop_io (NautilusDirectory *directory)
     }
 
     /* Low priority queue must be empty */
-    while (!nautilus_file_queue_is_empty (directory->details->extension_queue))
+    while (!nautilus_queue_is_empty (directory->details->extension_queue))
     {
-        file = nautilus_file_queue_head (directory->details->extension_queue);
+        file = nautilus_queue_head (directory->details->extension_queue);
 
         /* Start getting attributes if possible */
         extension_info_start (directory, file, &doing_io);
@@ -4152,8 +4152,10 @@ nautilus_directory_add_file_to_work_queue (NautilusDirectory *directory,
 {
     g_return_if_fail (file->details->directory == directory);
 
-    nautilus_file_queue_enqueue (directory->details->high_priority_queue,
-                                 file);
+    if (nautilus_queue_enqueue (directory->details->high_priority_queue, file))
+    {
+        g_object_ref (file);
+    }
 }
 
 
@@ -4175,12 +4177,9 @@ void
 nautilus_directory_remove_file_from_work_queue (NautilusDirectory *directory,
                                                 NautilusFile      *file)
 {
-    nautilus_file_queue_remove (directory->details->high_priority_queue,
-                                file);
-    nautilus_file_queue_remove (directory->details->low_priority_queue,
-                                file);
-    nautilus_file_queue_remove (directory->details->extension_queue,
-                                file);
+    nautilus_queue_remove (directory->details->high_priority_queue, file);
+    nautilus_queue_remove (directory->details->low_priority_queue, file);
+    nautilus_queue_remove (directory->details->extension_queue, file);
 }
 
 
@@ -4189,10 +4188,11 @@ move_file_to_low_priority_queue (NautilusDirectory *directory,
                                  NautilusFile      *file)
 {
     /* Must add before removing to avoid ref underflow */
-    nautilus_file_queue_enqueue (directory->details->low_priority_queue,
-                                 file);
-    nautilus_file_queue_remove (directory->details->high_priority_queue,
-                                file);
+    if (nautilus_queue_enqueue (directory->details->low_priority_queue, file))
+    {
+        g_object_ref (file);
+    }
+    nautilus_queue_remove (directory->details->high_priority_queue, file);
 }
 
 static void
@@ -4200,8 +4200,9 @@ move_file_to_extension_queue (NautilusDirectory *directory,
                               NautilusFile      *file)
 {
     /* Must add before removing to avoid ref underflow */
-    nautilus_file_queue_enqueue (directory->details->extension_queue,
-                                 file);
-    nautilus_file_queue_remove (directory->details->low_priority_queue,
-                                file);
+    if (nautilus_queue_enqueue (directory->details->extension_queue, file))
+    {
+        g_object_ref (file);
+    }
+    nautilus_queue_remove (directory->details->low_priority_queue, file);
 }
