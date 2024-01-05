@@ -825,7 +825,7 @@ update_name_field (NautilusPropertiesWindow *self)
     gchar *name_value;
     guint file_counter = 0;
 
-    for (GList *l = self->files; l != NULL; l = l->next)
+    for (GList *l = self->files; l != NULL && file_counter <= 50; l = l->next)
     {
         NautilusFile *file = NAUTILUS_FILE (l->data);
 
