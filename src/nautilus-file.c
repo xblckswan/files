@@ -4382,8 +4382,9 @@ get_default_file_icon (void)
     return fallback_icon;
 }
 
-gboolean
-nautilus_file_get_filesystem_remote (NautilusFile *file)
+static gboolean
+nautilus_file_get_filesystem_remote_with_parent (NautilusFile *file,
+                                                 NautilusFile *dir)
 {
     g_assert (NAUTILUS_IS_FILE (file));
 
@@ -4391,18 +4392,22 @@ nautilus_file_get_filesystem_remote (NautilusFile *file)
     {
         return file->details->filesystem_remote;
     }
+    else if (dir != NULL)
+    {
+        return dir->details->filesystem_remote;
+    }
     else
     {
-        g_autoptr (NautilusFile) parent = NULL;
+        g_autoptr (NautilusFile) parent = nautilus_file_get_parent (file);
 
-        parent = nautilus_file_get_parent (file);
-        if (parent != NULL)
-        {
-            return parent->details->filesystem_remote;
-        }
+        return parent != NULL ? parent->details->filesystem_remote : FALSE;
     }
+}
 
-    return FALSE;
+gboolean
+nautilus_file_get_filesystem_remote (NautilusFile *file)
+{
+    return nautilus_file_get_filesystem_remote_with_parent (file, NULL);
 }
 
 static gboolean
@@ -4453,7 +4458,7 @@ get_speed_tradeoff_preference_for_file (NautilusFile               *file,
         else
         {
             /* only local files */
-            return !nautilus_file_is_remote (file);
+            return !nautilus_file_get_filesystem_remote_with_parent (file, parent);
         }
     }
 
