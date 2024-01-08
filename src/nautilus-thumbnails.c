@@ -29,6 +29,7 @@
 #include "nautilus-directory-notify.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-file-utilities.h"
+#include "nautilus-queue.h"
 #include <math.h>
 #include <gtk/gtk.h>
 #include <errno.h>
@@ -76,10 +77,7 @@ static guint thumbnail_thread_starter_id = 0;
 
 /* The list of NautilusThumbnailInfo structs containing information about the
  *  thumbnails we are making. */
-static GQueue thumbnails_to_make = G_QUEUE_INIT;
-
-/* Quickly check if uri is in thumbnails_to_make list */
-static GHashTable *thumbnails_to_make_hash = NULL;
+static NautilusQueue *thumbnails_to_make = NULL;
 
 /* The icons being currently thumbnailed. */
 static GHashTable *currently_thumbnailing_hash = NULL;
@@ -119,12 +117,46 @@ get_file_mtime (const char *file_uri,
 }
 
 static void
-free_thumbnail_info (NautilusThumbnailInfo *info)
+free_thumbnail_info (gpointer data)
 {
+    NautilusThumbnailInfo *info = data;
+
     g_free (info->image_uri);
     g_free (info->mime_type);
     g_clear_object (&info->cancellable);
     g_free (info);
+}
+
+static gboolean
+info_equals (gconstpointer a,
+             gconstpointer b)
+{
+    NautilusThumbnailInfo *info_a = (gpointer) a;
+    NautilusThumbnailInfo *info_b = (gpointer) b;
+
+    if (g_strcmp0 (info_a->image_uri, info_b->image_uri) == 0)
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+static guint
+info_hash (gconstpointer key)
+{
+    NautilusThumbnailInfo *info = (gpointer) key;
+
+    return g_str_hash (info->image_uri);
+}
+
+static NautilusThumbnailInfo *
+thumbnail_info_new (const char *uri)
+{
+    NautilusThumbnailInfo *info = g_new0 (NautilusThumbnailInfo, 1);
+
+    info->image_uri = g_strdup (uri);
+    return info;
 }
 
 static GnomeDesktopThumbnailFactory *
@@ -168,22 +200,16 @@ get_thumbnail_factory (void)
 void
 nautilus_thumbnail_remove_from_queue (const char *file_uri)
 {
-    GList *node;
     NautilusThumbnailInfo *info;
 
-    if (G_UNLIKELY (thumbnails_to_make_hash == NULL))
+    if (G_UNLIKELY (thumbnails_to_make == NULL))
     {
         return;
     }
 
-    node = g_hash_table_lookup (thumbnails_to_make_hash, file_uri);
-    if (node != NULL)
-    {
-        g_hash_table_remove (thumbnails_to_make_hash, file_uri);
-        free_thumbnail_info (node->data);
-        g_queue_delete_link (&thumbnails_to_make, node);
-        return;
-    }
+    info = thumbnail_info_new (file_uri);
+    nautilus_queue_remove (thumbnails_to_make, info);
+    free_thumbnail_info (info);
 
     info = g_hash_table_lookup (currently_thumbnailing_hash, file_uri);
     if (info != NULL)
@@ -195,20 +221,15 @@ nautilus_thumbnail_remove_from_queue (const char *file_uri)
 void
 nautilus_thumbnail_prioritize (const char *file_uri)
 {
-    GList *node;
+    NautilusThumbnailInfo *temp_info = thumbnail_info_new (file_uri);
 
-    if (G_UNLIKELY (thumbnails_to_make_hash == NULL))
+    if (G_UNLIKELY (thumbnails_to_make == NULL))
     {
         return;
     }
 
-    node = g_hash_table_lookup (thumbnails_to_make_hash, file_uri);
-
-    if (node != NULL)
-    {
-        g_queue_unlink (&thumbnails_to_make, node);
-        g_queue_push_head_link (&thumbnails_to_make, node);
-    }
+    nautilus_queue_move_existing_to_head (thumbnails_to_make, temp_info);
+    free_thumbnail_info (temp_info);
 }
 
 
@@ -299,12 +320,12 @@ nautilus_create_thumbnail (NautilusFile *file)
     time_t file_mtime = 0;
     NautilusThumbnailInfo *info;
     NautilusThumbnailInfo *existing_info;
-    GList *existing, *node;
+    NautilusThumbnailInfo *pending_info;
+    g_autofree char *uri = nautilus_file_get_uri (file);
 
     nautilus_file_set_is_thumbnailing (file, TRUE);
 
-    info = g_new0 (NautilusThumbnailInfo, 1);
-    info->image_uri = nautilus_file_get_uri (file);
+    info = thumbnail_info_new (uri);
     info->mime_type = g_strdup (nautilus_file_get_mime_type (file));
     info->cancellable = g_cancellable_new ();
 
@@ -324,29 +345,24 @@ nautilus_create_thumbnail (NautilusFile *file)
     info->original_file_mtime = file_mtime;
     info->updated_file_mtime = file_mtime;
 
-    if (G_UNLIKELY (thumbnails_to_make_hash == NULL))
+    if (G_UNLIKELY (thumbnails_to_make == NULL))
     {
-        thumbnails_to_make_hash = g_hash_table_new (g_str_hash,
-                                                    g_str_equal);
+        thumbnails_to_make = nautilus_queue_new (info_hash, info_equals, NULL);
         currently_thumbnailing_hash = g_hash_table_new (g_str_hash,
                                                         g_str_equal);
     }
 
     /* Check if it is already in the list of thumbnails to make or
      *  currently being made. */
-    existing = g_hash_table_lookup (thumbnails_to_make_hash, info->image_uri);
     existing_info = g_hash_table_lookup (currently_thumbnailing_hash, info->image_uri);
+    pending_info = nautilus_queue_find_item (thumbnails_to_make, info);
 
-    if (existing == NULL && existing_info == NULL)
+    if (existing_info == NULL && pending_info == NULL)
     {
         /* Add the thumbnail to the list. */
         g_debug ("(Main Thread) Adding thumbnail: %s",
                  info->image_uri);
-        g_queue_push_tail (&thumbnails_to_make, info);
-        node = g_queue_peek_tail_link (&thumbnails_to_make);
-        g_hash_table_insert (thumbnails_to_make_hash,
-                             info->image_uri,
-                             node);
+        nautilus_queue_enqueue (thumbnails_to_make, info);
 
         /* If we didn't schedule the thumbnail function to start on idle, do
          *  that now. We don't want to start it until all the other work is
@@ -364,7 +380,7 @@ nautilus_create_thumbnail (NautilusFile *file)
         /* The file in the queue might need a new original mtime */
         if (existing_info == NULL)
         {
-            existing_info = existing->data;
+            existing_info = pending_info;
         }
         existing_info->updated_file_mtime = info->original_file_mtime;
         free_thumbnail_info (info);
@@ -389,16 +405,12 @@ thumbnail_finalize (NautilusThumbnailInfo *info)
     }
     else
     {
-        GList *node;
-
         info->original_file_mtime = info->updated_file_mtime;
 
-        g_queue_push_tail (&thumbnails_to_make, info);
-        node = g_queue_peek_tail_link (&thumbnails_to_make);
-        g_hash_table_insert (thumbnails_to_make_hash, info->image_uri, node);
+        nautilus_queue_enqueue (thumbnails_to_make, info);
     }
 
-    if (g_queue_is_empty (&thumbnails_to_make))
+    if (nautilus_queue_is_empty (thumbnails_to_make))
     {
         g_debug ("(Thumbnail Async Thread) Exiting");
     }
@@ -529,7 +541,6 @@ thumbnail_starter_cb (gpointer data)
     time_t current_time;
     guint backoff_time;
     guint backoff_time_min = THUMBNAIL_CREATION_DELAY_SECS + 1;
-    GList *node;
 
     g_debug ("(Main Thread) Creating thumbnails thread");
 
@@ -542,11 +553,10 @@ thumbnail_starter_cb (gpointer data)
     }
 
     /* We loop until the queue is empty, or we reach the thread limit. */
-    while (ignored_thumbnails < g_queue_get_length (&thumbnails_to_make) &&
+    while (ignored_thumbnails < nautilus_queue_get_length (thumbnails_to_make) &&
            running_threads <= max_threads)
     {
-        info = g_queue_pop_head (&thumbnails_to_make);
-        g_hash_table_remove (thumbnails_to_make_hash, info->image_uri);
+        info = nautilus_queue_dequeue (thumbnails_to_make);
 
         current_orig_mtime = info->updated_file_mtime;
         time (&current_time);
@@ -563,9 +573,7 @@ thumbnail_starter_cb (gpointer data)
             backoff_time = THUMBNAIL_CREATION_DELAY_SECS - (current_time - current_orig_mtime);
             backoff_time_min = MIN (backoff_time, backoff_time_min);
 
-            g_queue_push_tail (&thumbnails_to_make, info);
-            node = g_queue_peek_tail_link (&thumbnails_to_make);
-            g_hash_table_insert (thumbnails_to_make_hash, info->image_uri, node);
+            nautilus_queue_enqueue (thumbnails_to_make, info);
             ignored_thumbnails += 1;
             continue;
         }

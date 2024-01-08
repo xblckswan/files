@@ -46,3 +46,11 @@ void               nautilus_queue_remove   (NautilusQueue *queue,
 gpointer           nautilus_queue_head     (NautilusQueue *queue);
 
 gboolean           nautilus_queue_is_empty (NautilusQueue *queue);
+
+void               nautilus_queue_move_existing_to_head (NautilusQueue *queue,
+                                                         gconstpointer  item);
+
+gpointer           nautilus_queue_find_item             (NautilusQueue *queue,
+                                                         gpointer       key);
+
+guint              nautilus_queue_get_length            (NautilusQueue *queue);

@@ -114,3 +114,38 @@ nautilus_queue_is_empty (NautilusQueue *queue)
 {
     return g_queue_is_empty (queue->data);
 }
+
+void
+nautilus_queue_move_existing_to_head (NautilusQueue *queue,
+                                      gconstpointer  item)
+{
+    GList *link = g_hash_table_lookup (queue->item_to_link_map, item);
+
+    if (link == NULL)
+    {
+        return;
+    }
+
+    g_queue_unlink (queue->data, link);
+    g_queue_push_head_link (queue->data, link);
+}
+
+gpointer
+nautilus_queue_find_item (NautilusQueue *queue,
+                          gpointer       key)
+{
+    GList *link = g_hash_table_lookup (queue->item_to_link_map, key);
+
+    if (link == NULL)
+    {
+        return NULL;
+    }
+
+    return link->data;
+}
+
+guint
+nautilus_queue_get_length (NautilusQueue *queue)
+{
+    return g_queue_get_length (queue->data);
+}
