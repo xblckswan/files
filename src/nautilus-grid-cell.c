@@ -304,6 +304,7 @@ nautilus_grid_cell_init (NautilusGridCell *self)
     g_object_bind_property (self, "item",
                             self->item_signal_group, "target",
                             G_BINDING_SYNC_CREATE);
+    g_object_bind_property (self->label, "label", self, "label", G_BINDING_SYNC_CREATE);
 
 #if PANGO_VERSION_CHECK (1, 44, 4)
     {

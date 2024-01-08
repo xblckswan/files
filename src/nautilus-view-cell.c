@@ -28,6 +28,7 @@ struct _NautilusViewCellPrivate
     NautilusViewItem *item; /* Owned reference */
 
     guint icon_size;
+    char *label;
     guint position;
 
     gboolean called_once;
@@ -42,6 +43,7 @@ enum
     PROP_VIEW,
     PROP_ITEM,
     PROP_ICON_SIZE,
+    PROP_LABEL,
     PROP_POSITION,
     N_PROPS
 };
@@ -74,6 +76,12 @@ nautilus_view_cell_get_property (GObject    *object,
         case PROP_ICON_SIZE:
         {
             g_value_set_uint (value, priv->icon_size);
+        }
+        break;
+
+        case PROP_LABEL:
+        {
+            g_value_set_string (value, priv->label);
         }
         break;
 
@@ -119,6 +127,12 @@ nautilus_view_cell_set_property (GObject      *object,
         }
         break;
 
+        case PROP_LABEL:
+        {
+            g_set_str (&priv->label, g_value_get_string (value));
+        }
+        break;
+
         case PROP_POSITION:
         {
             priv->position = g_value_get_uint (value);
@@ -146,6 +160,7 @@ nautilus_view_cell_finalize (GObject *object)
 
     g_clear_object (&priv->item);
     g_clear_weak_pointer (&priv->view);
+    g_free (priv->label);
 
     G_OBJECT_CLASS (nautilus_view_cell_parent_class)->finalize (object);
 }
@@ -174,6 +189,12 @@ nautilus_view_cell_class_init (NautilusViewCellClass *klass)
                                                     NAUTILUS_GRID_ICON_SIZE_LARGE,
                                                     G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
+    /* The "label" property is mean for the main label i.e. name-cell and
+     * grid-cell for accessibility purposes.
+     */
+    properties[PROP_LABEL] = g_param_spec_string ("label", NULL, NULL,
+                                                  "",
+                                                  G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
     properties[PROP_POSITION] = g_param_spec_uint ("position", NULL, NULL,
                                                    0, G_MAXUINT, GTK_INVALID_LIST_POSITION,
                                                    G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);

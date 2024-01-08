@@ -869,6 +869,7 @@ setup_name_cell (GtkSignalListItemFactory *factory,
     g_object_bind_property (self, "icon-size",
                             cell, "icon-size",
                             G_BINDING_SYNC_CREATE);
+    g_object_bind_property (cell, "label", listitem, "accessible-label", G_BINDING_SYNC_CREATE);
 
     nautilus_name_cell_set_path (NAUTILUS_NAME_CELL (cell),
                                  self->path_attribute_q,
@@ -933,20 +934,6 @@ bind_name_cell (GtkSignalListItemFactory *factory,
     item = get_view_item (listitem);
 
     nautilus_view_item_set_item_ui (item, gtk_column_view_cell_get_child (listitem));
-
-    if (nautilus_view_cell_once (NAUTILUS_VIEW_CELL (cell)))
-    {
-        GtkWidget *row_widget;
-
-        /* At the time of ::setup emission, the item ui has got no parent yet,
-         * that's why we need to complete the widget setup process here, on the
-         * first time ::bind is emitted. */
-        row_widget = gtk_widget_get_parent (gtk_widget_get_parent (cell));
-
-        gtk_accessible_update_relation (GTK_ACCESSIBLE (row_widget),
-                                        GTK_ACCESSIBLE_RELATION_LABELLED_BY, cell, NULL,
-                                        -1);
-    }
 
     if (self->expand_as_a_tree)
     {
